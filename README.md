@@ -32,7 +32,7 @@ Download your backup from the demo first. The full dashboard opens it exactly
 as you left it — every transaction, bill, goal, debt and subscription still in
 place. Nothing has to be typed twice.
 
-**[Get the full dashboard on Etsy →](https://www.etsy.com/shop/FinNestStudio?ref=demo)**
+**[Get the full dashboard on Etsy →](https://www.etsy.com/listing/4515406663/ultimate-digital-personal-finance?ref=demo)**
 
 ---
 
