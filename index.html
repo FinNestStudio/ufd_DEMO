@@ -5297,7 +5297,7 @@ function accountDialog(a){
     '<div class="field"><label for="acName">Name</label><input class="input" id="acName" maxlength="30" value="' + escapeHTML(a ? a.name : "") + '" placeholder="Joint account, Savings pot…"><div class="error" id="acErr" role="alert"></div></div>'
     + '<div class="field"><span style="font-weight:600;font-size:14px" id="acKindL">What kind</span><div class="pick" role="group" aria-labelledby="acKindL">' + ACCT_KINDS.map(function(k){
         return '<button type="button" data-akind="' + k[0] + '" aria-pressed="' + (k[0] === kind) + '">' + k[1] + ' ' + k[2] + '</button>'; }).join("") + '</div></div>'
-    + (isNew ? '<div class="field"><label for="acBal">What’s in it now</label><input class="input num" id="acBal" inputmode="decimal" placeholder="0.00"><div class="hint">From your banking app. Leave empty if you don’t know yet.</div></div>' : '')
+    + '<div class="field"><label for="acBal">What’s in it now</label><input class="input num" id="acBal" inputmode="decimal" placeholder="0.00" value="' + (isNew || cashAtToday(a.id) === null ? '' : round2(cashAtToday(a.id)).toFixed(2)) + '"><div class="hint">' + (isNew ? 'From your banking app. Leave empty if you don’t know yet.' : 'From your banking app. Change it if your bank shows something else.') + '</div></div>'
     + '<label class="check"><input type="checkbox" id="acSafe"' + (!a || a.includeInSafe ? ' checked' : '') + '> Count it in safe to spend</label>'
     + '<p class="hint">Usually yes for the account you spend from, no for savings. Credit cards go on the Debt screen: tick “I still use this card”.</p>',
     (isNew ? '' : '<button type="button" class="btn ghost" id="acDel" style="margin-right:auto;color:var(--warnink)">Retire it</button>')
@@ -5310,14 +5310,19 @@ function accountDialog(a){
       });
       $("acSave").addEventListener("click", function(){
         var name = $("acName").value.trim(); if(!name){ $("acErr").textContent = "Give it a name."; $("acName").focus(); return; }
-        var bal = isNew && $("acBal").value.trim() ? parseAmount($("acBal").value) : null;
+        var bal = $("acBal").value.trim() ? parseAmount($("acBal").value) : null;
         if(bal !== null && !isFinite(bal)){ $("acErr").textContent = "Type the balance as a number, like 1250.00."; return; }
         pushUndo(isNew ? "Account added" : "Account changed");
         if(isNew){
           var acc = normAccount({id:uid(), name:name, kind:kind, includeInSafe:$("acSafe").checked, color:"#5E83A4"});
           state.accounts.push(acc);
           if(bal !== null) confirmReviewBalance(acc.id, round2(bal));
-        }else{ a.name = name; a.kind = kind; a.includeInSafe = $("acSafe").checked; }
+        }else{
+          a.name = name; a.kind = kind; a.includeInSafe = $("acSafe").checked;
+          /* a new balance only when it differs from what the planner has now */
+          var had = cashAtToday(a.id);
+          if(bal !== null && (had === null || Math.abs(round2(bal) - round2(had)) >= 0.005)) confirmReviewBalance(a.id, round2(bal));
+        }
         closeDialog(); commit(isNew ? name + " added." : "Saved.");
       });
       if(!isNew) $("acDel").addEventListener("click", function(){
@@ -6117,7 +6122,7 @@ RENDER.repeats = function(){
         .map(function(b){
           var t = repType(b), nx = state.billOccs.filter(function(o){ return o.billId === b.id && !o.paid && !o.skipped && o.dueDate >= today; }).sort(function(a, z){ return a.dueDate < z.dueDate ? -1 : 1; })[0];
           return '<button type="button" class="row-btn" data-act="rep-edit" data-id="' + escapeHTML(b.id) + '"><span class="em" aria-hidden="true">' + (t === "sub" ? "🔁" : t === "debt" ? "💳" : "🧾") + '</span>'
-            + '<span style="min-width:0"><span class="n" style="display:block">' + escapeHTML(b.name) + '</span><span class="m" style="display:block">' + escapeHTML(howOftenOf(b).label + (b.v3Paused ? " · paused" : nx ? " · next " + shortDateLabel(parseDate(nx.dueDate)) : "")) + priceBadge(b) + '</span></span>'
+            + '<span style="min-width:0"><span class="n" style="display:block">' + escapeHTML(b.name) + '</span><span class="m" style="display:block">' + escapeHTML(howOftenOf(b).label + (b.v3Paused ? " · paused" : nx ? " · next " + shortDateLabel(parseDate(nx.dueDate)) : "") + paidFromLabel(b)) + priceBadge(b) + '</span></span>'
             + '<span class="a">' + (b.v3Vary ? "~" : "") + escapeHTML(moneyShort(b.amount)) + '</span></button>';
         }).join("") : '<p class="empty">Nothing repeats yet. Add your rent, phone and subscriptions.</p>')
     + (repFilter === "all" || repFilter === "pay" ? payLineHTML() + sourcesHTML() : '') + '</section></div>' + cancelledHTML();
@@ -6141,7 +6146,7 @@ function repeatRowHTML(x){
     : x.kind === "src" ? '<button type="button" class="btn ghost sm" data-act="src-in" data-id="' + escapeHTML(x.id) + '" data-date="' + escapeHTML(x.date) + '">Mark arrived</button>'
     : '<span class="hint">expected</span>';
   return '<div class="rep' + (x.overdue ? ' overdue' : '') + (x.paid ? ' done' : '') + '">' + dateChip(x.date)
-    + '<div style="min-width:0"><div class="n">' + escapeHTML(x.name) + '</div><div class="m">' + escapeHTML(TYPE_WORD[x.type] + " · " + when) + '</div></div>'
+    + '<div style="min-width:0"><div class="n">' + escapeHTML(x.name) + '</div><div class="m">' + escapeHTML(TYPE_WORD[x.type] + " · " + when + (x.kind === "occ" ? paidFromLabel(billById((occById(x.id) || {}).billId)) : "")) + '</div></div>'
     + '<div class="a"' + (x.type === "pay" ? ' style="color:var(--good)"' : '') + '>' + (x.type === "pay" ? "+" : "") + (x.vary ? '<span title="About this much: it changes each time">~</span>' : '') + escapeHTML(money(x.amount)) + '</div>' + btn + '</div>';
 }
 function payLineHTML(){
@@ -6215,11 +6220,12 @@ function repeatDialog(b, preset){
     + '<div class="field"><label for="rpHow">How often</label><select class="select" id="rpHow">' + HOW_OFTEN.map(function(h){ return '<option value="' + h.id + '"' + (h.id === how ? ' selected' : '') + '>' + h.label + '</option>'; }).join("") + '</select></div>'
     + '<div class="field"><label for="rpNext">Next due</label><input class="input" id="rpNext" type="date" value="' + escapeHTML(next) + '"></div>'
     + '<div class="field"><label for="rpCat">Category (optional)</label><select class="select" id="rpCat"><option value="">None</option>' + state.categories.map(function(c){
-        return '<option value="' + escapeHTML(c.id) + '"' + (b && b.categoryId === c.id ? ' selected' : '') + '>' + escapeHTML(c.emoji + " " + c.name) + '</option>'; }).join("") + '</select></div>',
+        return '<option value="' + escapeHTML(c.id) + '"' + (b && b.categoryId === c.id ? ' selected' : '') + '>' + escapeHTML(c.emoji + " " + c.name) + '</option>'; }).join("") + '</select></div>' + paidFromFieldHTML(b),
     (isNew ? '' : '<button type="button" class="btn ghost" id="rpDel" style="margin-right:auto;color:var(--warnink)">Remove</button>')
     + (b && repType(b) === "sub" ? '<button type="button" class="btn ghost" data-act="sub-cancel" data-id="' + escapeHTML(b.id) + '">✂️ Cancel it</button>' : '')
     + '<button type="button" class="btn ghost" data-close>Cancel</button><button type="button" class="btn primary" id="rpSave">' + (isNew ? "Add it" : "Save") + '</button>',
     function(dlg){
+      wirePaidFrom();
       dlg.querySelector(".pick").addEventListener("click", function(e){
         var x = e.target.closest("[data-type]"); if(!x) return;
         Array.prototype.forEach.call(dlg.querySelectorAll("[data-type]"), function(y){ y.setAttribute("aria-pressed", "false"); });
@@ -6233,12 +6239,14 @@ function repeatDialog(b, preset){
         var h = HOW_OFTEN.filter(function(x){ return x.id === $("rpHow").value; })[0] || HOW_OFTEN[0];
         pushUndo(isNew ? "Repeat added" : "Repeat changed");
         var fields = {name:name, amount:round2(amt), cadence:h.cadence, everyN:h.n, anchorDate:due, categoryId:$("rpCat").value || null, v3Type:type === "sub" ? "subscription" : "bill", v3Auto:$("rpAuto").checked};
+        var from = paidFromValue(); if(from !== undefined) fields.accountId = from;
         if(isNew) state.bills.push(normBill(fields));
         else {
           Object.keys(fields).forEach(function(k){ b[k] = fields[k]; });
           /* payments still to come follow the change; paid ones stay as they were */
           state.billOccs = state.billOccs.filter(function(o){ return !(o.billId === b.id && !o.paid && !o.skipped && o.dueDate >= today); });
         }
+        if(!isNew) syncPotAccounts(b);
         materialiseBills(); autoPayBills();
         closeDialog(); commit(isNew ? name + " added." : "Saved.");
       });
@@ -6252,6 +6260,71 @@ function repeatDialog(b, preset){
 }
 ACTIONS["rep-add"] = function(){ repeatDialog(null); };
 ACTIONS["rep-edit"] = function(el){ var b = billById(el.getAttribute("data-id")); if(b) repeatDialog(b); };
+
+
+/* ============================================================
+   PAID FROM: which account a repeat comes out of. A buyer keeps
+   three accounts: everyday money, a bills account and one for her
+   envelopes, and wants safe to spend to be the everyday account
+   alone. Before this every bill was held back from the first
+   account counted in safe to spend, even when it's paid from an
+   account that isn't counted. Now a bill paid from an account left
+   out of safe to spend isn't held back from it (balance mode; the
+   pay-period mode adds up all money in and out, accounts aside),
+   it isn't taken off the forecast either, and marking it paid
+   takes it from that account. Debt payments and tracked cards keep
+   their own rules. V3 only: the shared core is not changed.
+   ============================================================ */
+function cashAccounts(){ return state.accounts.filter(function(a){ return !a.archived && a.kind !== "card"; }); }
+function defaultBillAccount(){ return includedAccounts()[0] || cashAccounts()[0] || null; }
+/* the account a bill is set to come out of, if it's still open */
+function billAccount(b){ var a = b && b.accountId ? accountById(b.accountId) : null; return a && !a.archived && a.kind !== "card" ? a : null; }
+/* paid from an account that isn't counted in safe to spend */
+function paidOutside(b){
+  var a = billAccount(b); if(!a || a.includeInSafe) return false;
+  if(b.debtId) return false;
+  return true;
+}
+function occPaidOutside(o){ return paidOutside(billById(o.billId)); }
+/* spending that comes out of an account counted in safe to spend (or one not chosen) */
+function countsInSafe(accountId){ var a = accountId ? accountById(accountId) : null; return !a || (a.includeInSafe && !a.archived && a.kind !== "card"); }
+
+/* safe to spend: hold back only the bills paid from counted accounts */
+var paidFromPlainBalance = computeBalance;
+computeBalance = function(){
+  var all = state.billOccs, keep = all.filter(function(o){ return !occPaidOutside(o); });
+  if(keep.length === all.length) return paidFromPlainBalance.apply(this, arguments);
+  state.billOccs = keep;
+  try { return paidFromPlainBalance.apply(this, arguments); }
+  finally { state.billOccs = all; }
+};
+
+/* ---------- the "Paid from" box in the repeat dialog ---------- */
+function paidFromFieldHTML(b){
+  var accts = cashAccounts(); if(accts.length < 2) return "";
+  var cur = (billAccount(b) || defaultBillAccount() || {}).id;
+  return '<div class="field"><label for="rpFrom">Paid from</label><select class="select" id="rpFrom">' + accts.map(function(a){
+      return '<option value="' + escapeHTML(a.id) + '"' + (a.id === cur ? ' selected' : '') + '>' + escapeHTML(a.name + (a.includeInSafe ? "" : " · not in safe to spend")) + '</option>';
+    }).join("") + '</select><div class="hint" id="rpFromHint" aria-live="polite"></div></div>';
+}
+function paidFromHint(){
+  var sel = $("rpFrom"), hint = $("rpFromHint"); if(!sel || !hint) return;
+  var a = accountById(sel.value);
+  hint.textContent = a && !a.includeInSafe && state.settings.basis === "balance"
+    ? a.name + " isn’t counted in safe to spend, so this bill won’t lower it. When it’s paid, it comes out of " + a.name + "." : "";
+}
+function wirePaidFrom(){ var sel = $("rpFrom"); if(sel){ sel.addEventListener("change", paidFromHint); paidFromHint(); } }
+/* the chosen account, or undefined when there's only one account (nothing to choose) */
+function paidFromValue(){ var sel = $("rpFrom"); return sel ? (sel.value || null) : undefined; }
+/* a yearly cost's pot sits in the same account as the bill */
+function syncPotAccounts(b){
+  (state.envelopes || []).forEach(function(e){ if(e && e.billIds && e.billIds.indexOf(b.id) >= 0) e.accountId = b.accountId || null; });
+}
+/* "· from Bills" on a repeat that doesn't come out of the main account */
+function paidFromLabel(b){
+  var a = billAccount(b), d = defaultBillAccount();
+  return a && cashAccounts().length > 1 && (!d || a.id !== d.id) ? " · from " + a.name : "";
+}
 
 /* ============================================================
    REPEATS AS A MONTH CALENDAR: every bill, debt payment and pay
@@ -7336,7 +7409,7 @@ function forecastModel(days, c){
   if(!any) return null;
   var events = [];
   state.billOccs.forEach(function(o){
-    if(o.paid || o.skipped) return;
+    if(o.paid || o.skipped || occPaidOutside(o)) return;   /* paid from an account outside safe to spend */
     var b = billById(o.billId);
     events.push({iso:o.dueDate < today ? today : o.dueDate, name:o.name, amount:-num(o.amount), kind:b && b.debtId ? "debt" : b && b.v3Type === "subscription" ? "sub" : "bill", overdue:o.dueDate < today});
   });
@@ -7345,7 +7418,7 @@ function forecastModel(days, c){
   /* Your usual pace, from days you actually tracked: a day you didn't write anything down
      isn't a day you spent nothing. Too little history: your category plans instead. */
   var usual = 0, tracked = {}, from = fmtISO(addDays(startOfToday(), -60));
-  state.transactions.forEach(function(t){ if(t.date >= from && t.date < today){ tracked[t.date] = 1; if(!t.billOccId && !t.cardPaymentFor && t.kind !== "cardcharge") usual += Math.max(0, num(t.amount)); } });
+  state.transactions.forEach(function(t){ if(t.date >= from && t.date < today){ tracked[t.date] = 1; if(!t.billOccId && !t.cardPaymentFor && t.kind !== "cardcharge" && countsInSafe(t.accountId)) usual += Math.max(0, num(t.amount)); } });
   state.dayCloses.forEach(function(d){ if(d >= from && d < today) tracked[d] = 1; });
   var trackedDays = Object.keys(tracked).length, planned = state.categories.reduce(function(n, x){ return n + monthlyPlan(x); }, 0);
   var usualFrom = trackedDays >= 14 ? "tracked" : planned > 0 ? "plan" : "tracked";
